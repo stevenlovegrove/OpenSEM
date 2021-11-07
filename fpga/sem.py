@@ -1,5 +1,5 @@
 from nmigen import *
-from nmigen.build.dsl import Connector
+from nmigen.build.dsl import Clock, Connector
 from nmigen.lib.fifo import AsyncFIFO
 from nmigen_boards.alchitry_au import *
 from nmigen.cli import main
@@ -112,9 +112,7 @@ class SampleReader(Elaboratable):
         return m
 
 class PixelScan(Elaboratable):
-    def __init__(self, pixel_clock):
-        self.pixel_clock = pixel_clock
-
+    def __init__(self):
         ############ IN: Scan Config
         # DAC deflection beam offsets for top-left
         self.x_begin = Signal(16)
@@ -160,8 +158,6 @@ class PixelScan(Elaboratable):
     def elaborate(self, platform):
         m = Module()
 
-        # m.domains.pixel = ClockDomain("pixel")
-
         # Finite state machine (FSM): Starts in first state, "HOLD".
         # FSM accepts changes to parameters in HOLD state whilst hold
         # signal is applied. Scanning begins when this goes low.
@@ -169,7 +165,7 @@ class PixelScan(Elaboratable):
         # image respectively
         with m.FSM() as fsm:
             with m.State("HOLD"):
-                m.d.sync += [
+                m.d.pixel += [
                     # Sync user config
                     self.l_x_begin.eq(self.x_begin),
                     self.l_y_begin.eq(self.y_begin),
@@ -193,21 +189,21 @@ class PixelScan(Elaboratable):
 
             with m.State("SCAN"):
                 with m.If(self.pos_x > 0):
-                    m.d.sync += self.pos_x.eq(self.pos_x - 1)
+                    m.d.pixel += self.pos_x.eq(self.pos_x - 1)
                     m.next = "SCAN"
                 with m.Else():
-                    m.d.sync += [
+                    m.d.pixel += [
                         self.pos_x.eq(self.l_x_steps),
                         self.blank_x.eq(1)
                     ]
                     with m.If(self.pos_y > 0):
-                        m.d.sync += [
+                        m.d.pixel += [
                             # Move y deflector beam
                             self.dac_y.eq(self.dac_y + self.y_grad)
                         ]
                         m.next = "ROW_BLANK"
                     with m.Else():
-                        m.d.sync += [
+                        m.d.pixel += [
                             self.pos_y.eq(self.y_steps),
                             self.blank_y.eq(1),
                             self.dac_y.eq(self.dac_y + self.y_grad),
@@ -216,7 +212,7 @@ class PixelScan(Elaboratable):
 
             with m.State("ROW_BLANK"):
                 # Just a cycle to signal row end and let row cap reset
-                m.d.sync += self.blank_x.eq(0)
+                m.d.pixel += self.blank_x.eq(0)
                 m.next = "SCAN"
 
         return m
@@ -237,17 +233,28 @@ class Top(Elaboratable):
     def elaborate(self, platform):
         m = Module()
 
+        # Three clock domains, all rising edge
+        #   sync and ftdi are similar clocks speeds, possibly out of phase
+        #   pixel is derived from sync, possibly the same
+        m.domains += ClockDomain('sync')   # Main board clock
+        m.domains += ClockDomain('pixel')  # Pixel output clock
+        m.domains += ClockDomain('ftdi')   # FTDI FIFO clock
+
+        # Let's just set the pixel clock equal to main clock for now
+        m.d.comb += ClockSignal('pixel').eq( ClockSignal('sync'))
+
+        # Setup the submodules and connect their signals
+        m.submodules.pixel_scan = PixelScan()
         m.submodules.sample_reader = SampleReader()
         m.submodules.backscatter = Backscatter(m.submodules.sample_reader.samples[0:4])
-        m.submodules.mux = SampleMux(16,
+        m.submodules.sample_mux = SampleMux(16,
             [m.submodules.backscatter.sum,
              m.submodules.backscatter.x_diff, 
              m.submodules.backscatter.y_diff, 
              m.submodules.backscatter.cross]
             + m.submodules.sample_reader.samples[4:]
         )
-
-        # m.domains += ClockDomain("ftdi")
+        
         # m.submodules.ftdi_rx_fifo = AsyncFIFO(
         #     width=self.fifo_width_bits,  depth=2,
         #     r_domain='sync',  w_domain='ftdi'
