@@ -1,6 +1,6 @@
-# Cambridge StereoScan 250 Wiring
+# Cambridge StereoScan 260 Wiring
 
-This document serves as a wiring reference for the Cambridge StereoScan 250 Scanning Electron Microscope (SEM). My own StereoScan was purchased with cut wires and no control electronics. My intention is to drive the microscope with an open HW/SW control board and power electronics.
+This document serves as a wiring reference for the Cambridge StereoScan 260 Scanning Electron Microscope (SEM). My own StereoScan was purchased with cut wires and no control electronics. My intention is to drive the microscope with an open HW/SW control board and power electronics.
 
 <img src="stereoscan.jpg" style="zoom:25%;" >
 
@@ -142,9 +142,9 @@ The device terminal connections appear to be 6 resistive networks (2 with 3 inte
 
 ## Controls
 
-[Source StereoScan 250 Youtube](https://www.youtube.com/watch?v=E9pEZvchzuI)
+[Source StereoScan 260 Youtube](https://www.youtube.com/watch?v=E9pEZvchzuI)
 
-In lieu of an operating or repair manual, here is a screenshot of the original control panel from a StereoScan 250 MkIII as a hint at what the cables above would connect to. 
+In lieu of an operating or repair manual, here is a screenshot of the original control panel from a StereoScan 260 MkIII as a hint at what the cables above would connect to. 
 
 <img src="controls.png">
 
@@ -152,7 +152,7 @@ In lieu of an operating or repair manual, here is a screenshot of the original c
 
 ## Power
 
-[Source StereoScan 250 Youtube](https://www.youtube.com/watch?v=E9pEZvchzuI)
+[Source StereoScan 260 Youtube](https://www.youtube.com/watch?v=E9pEZvchzuI)
 
 Similarly, here is the power status panel from the original StereoScan MkIII controller.
 
