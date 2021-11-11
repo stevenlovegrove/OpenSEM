@@ -14,19 +14,23 @@ Below is a coarse schematic of the main components of the electron beam path (fr
 
 ## Block Functions
 
-Based on observations and cabling below, we wish to understand these different blocks and how they should be interfaced / driven. Current Understanding of blocks show below:
+We need to understand these different blocks and how they should be interfaced / driven. From the measurements and cable layout (documented in the following sections), I currently believe there are 13 coils, the filament and EHT to drive:
 
 
 
-Cap: Thermionic Emission Filament + Accelerating voltage (EHT)
-
-Cylinder 1: Condensor?
-
-Cylinder 2: Deflection Coils?
-
-Cylinder 3: Stigmata + ?
-
-Cone: Objective (focus)
+* Cap
+  * Thermionic Emission Filament
+  * Accelerating voltage (EHT)
+* Cylinder 1
+  * 4x correction (2x10ohm, 2x15ohm)
+* Cylinder 2
+  * condensor 1 (3.8ohm)
+  * condensor 2 (3.8ohm)
+* Cylinder 2
+  * 4 stigmata (2x50ohm, 2*3ohm?)
+  * 2 deflection (1.7ohm)
+* Cone
+  * 1 objective (5.6ohm)
 
 
 
