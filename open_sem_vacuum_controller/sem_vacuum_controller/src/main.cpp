@@ -20,6 +20,7 @@ constexpr char CMD_VENT[]  = ">>";
 constexpr char CMD_FAST_VENT[]  = ">+";
 constexpr char CMD_AUTO_ON[]  = "a+";
 constexpr char CMD_AUTO_OFF[]  = "a-";
+constexpr char CMD_ATM_CALIB[]  = "CA";
 
 constexpr uint8_t PIN_ROUGHING_START = 5;  // OUT: HIGH to power rotary pump
 
@@ -52,11 +53,13 @@ enum class Mode
 enum class EGaugeQuery
 {
   PR4,
+  ATM,
   None
 };
 
 const char* SGaugeQuery[] = {
   "PR4",
+  "ATM",
   ""
 };
 
@@ -158,39 +161,18 @@ void start_fast_vent()
 // State Machine
 ////////////////////////////////////////////////////////////
 
-void process_pc_command()
-{
-  char cmd[CMD_LEN];
-  const size_t bytes_read = serial_pc.readBytes(cmd, CMD_LEN);
-
-  if(bytes_read == CMD_LEN) {
-    if( !strncmp(cmd, CMD_IDLE, CMD_LEN) ) {
-      start_idle();
-    }else if( !strncmp(cmd, CMD_ROUGH, CMD_LEN) ) {
-      start_roughing();
-    }else if( !strncmp(cmd, CMD_PUMP, CMD_LEN) ) {
-      start_pumping();
-    }else if( !strncmp(cmd, CMD_VENT, CMD_LEN) ) {
-      start_vent();
-    }else if( !strncmp(cmd, CMD_FAST_VENT, CMD_LEN) ) {
-      start_fast_vent();
-    }else if( !strncmp(cmd, CMD_AUTO_ON, CMD_LEN) ) {
-      auto_transitions = true;
-    }else if( !strncmp(cmd, CMD_AUTO_OFF, CMD_LEN) ) {
-      auto_transitions = false;
-    }else{
-      report_error("unknown command");
-      Serial.print(cmd);
-    }
-  }else{
-    report_error("unexpected message");
-  }
-}
-
 void send_gauge_query(EGaugeQuery query, uint8_t addr = 254)
 {
   char buffer[24];
   snprintf(buffer, sizeof(buffer), "@%03d%s?;FF", addr, SGaugeQuery[(int)query]);
+  current_query = query;
+  serial_pressure.print(buffer);
+}
+
+void send_gauge_cmd(EGaugeQuery query, const char* arg, uint8_t addr = 254)
+{
+  char buffer[24];
+  snprintf(buffer, sizeof(buffer), "@%03d%s!%s;FF", addr, SGaugeQuery[(int)query], arg);
   current_query = query;
   serial_pressure.print(buffer);
 }
@@ -202,6 +184,9 @@ void process_gauage_ack(char* args)
     serial_pc.print("Pressure: ");
     serial_pc.print(f);
     serial_pc.println(" Torr");
+  }else if(current_query == EGaugeQuery::ATM) {
+    serial_pc.println("ATM ACK'ed");
+    serial_pc.println(args);
   }else{
     serial_pc.println("err5");
   }
@@ -248,6 +233,37 @@ void process_pressure_message()
   }else{
     // error
     serial_pc.println("err1");
+  }
+}
+
+void process_pc_command()
+{
+  char cmd[CMD_LEN];
+  const size_t bytes_read = serial_pc.readBytes(cmd, CMD_LEN);
+
+  if(bytes_read == CMD_LEN) {
+    if( !strncmp(cmd, CMD_IDLE, CMD_LEN) ) {
+      start_idle();
+    }else if( !strncmp(cmd, CMD_ROUGH, CMD_LEN) ) {
+      start_roughing();
+    }else if( !strncmp(cmd, CMD_PUMP, CMD_LEN) ) {
+      start_pumping();
+    }else if( !strncmp(cmd, CMD_VENT, CMD_LEN) ) {
+      start_vent();
+    }else if( !strncmp(cmd, CMD_FAST_VENT, CMD_LEN) ) {
+      start_fast_vent();
+    }else if( !strncmp(cmd, CMD_AUTO_ON, CMD_LEN) ) {
+      auto_transitions = true;
+    }else if( !strncmp(cmd, CMD_AUTO_OFF, CMD_LEN) ) {
+      auto_transitions = false;
+    }else if( !strncmp(cmd, CMD_ATM_CALIB, CMD_LEN) ) {
+      send_gauge_cmd(EGaugeQuery::ATM, "7.60E+2");    
+    }else{
+      report_error("unknown command");
+      Serial.print(cmd);
+    }
+  }else{
+    report_error("unexpected message");
   }
 }
 
