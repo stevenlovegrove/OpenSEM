@@ -41,6 +41,10 @@ bool auto_transitions = false;
 
 float progress = 0.0;
 
+constexpr float LOG_ATM_PRESSURE = 6.63331843328; // ln(760);
+float current_pressure = 0.0;
+float log_current_pressure = 0.0;
+
 enum class Mode
 {
   idle,
@@ -180,9 +184,10 @@ void send_gauge_cmd(EGaugeQuery query, const char* arg, uint8_t addr = 254)
 void process_gauage_ack(char* args)
 {
   if(current_query == EGaugeQuery::PR4) {
-    float f = atof(args);
+    current_pressure = atof(args);
+    log_current_pressure = log(current_pressure + 1.0);
     serial_pc.print("Pressure: ");
-    serial_pc.print(f);
+    serial_pc.print(args);
     serial_pc.println(" Torr");
   }else if(current_query == EGaugeQuery::ATM) {
     serial_pc.println("ATM ACK'ed");
@@ -353,8 +358,8 @@ void loop() {
     if(progress >= 1.0) progress = 0.0;
     break;
   case Mode::roughing:
+    progress = min(1.0, max(0.0, 1.0 - log_current_pressure / LOG_ATM_PRESSURE));
     progress_bar(20000, progress, 255);
-    progress += 0.001;
 
     if(auto_transitions) {
       // TODO: transition to pumping at target pressure
