@@ -22,6 +22,11 @@ constexpr char CMD_AUTO_ON[]  = "a+";
 constexpr char CMD_AUTO_OFF[]  = "a-";
 constexpr char CMD_ATM_CALIB[]  = "CA";
 
+constexpr char REPORT_PRESSURE_TORR = 'P';
+constexpr char REPORT_ATM_CALIB_DONE = 'A';
+constexpr char REPORT_ERROR = '!';
+constexpr char REPORT_END = '\n';
+
 constexpr uint8_t PIN_ROUGHING_START = 5;  // OUT: HIGH to power rotary pump
 
 constexpr uint8_t PIN_TURBO_STATUS   = 3;  // IN: HIGH IFF > 80% full speed
@@ -74,9 +79,24 @@ EGaugeQuery current_query = EGaugeQuery::None;
 // Utils
 ////////////////////////////////////////////////////////////
 
+template<typename S, typename T>
+void serialize(S& sp, const T& x)
+{
+  sp.write((char*)&x,sizeof(T));
+}
+
+template<typename S, typename T1, typename T2, typename... Args>
+void serialize(S& sp, const T1& x1, const T2& x2, Args... xs)
+{
+  serialize<S,T1>(sp, x1);
+  serialize(sp, x2,xs...);
+}
+
 void report_error(const char* err)
 {
+  serialize(serial_pc, REPORT_ERROR);
   serial_pc.write(err);
+  serialize(serial_pc, REPORT_END);
 }
 
 ////////////////////////////////////////////////////////////
@@ -186,14 +206,16 @@ void process_gauage_ack(char* args)
   if(current_query == EGaugeQuery::PR4) {
     current_pressure = atof(args);
     log_current_pressure = log(current_pressure + 1.0);
-    serial_pc.print("Pressure: ");
-    serial_pc.print(args);
-    serial_pc.println(" Torr");
+    serialize(serial_pc, REPORT_PRESSURE_TORR, current_pressure, REPORT_END);
+    // serial_pc.print("Pressure: ");
+    // serial_pc.print(args);
+    // serial_pc.println(" Torr");
   }else if(current_query == EGaugeQuery::ATM) {
-    serial_pc.println("ATM ACK'ed");
-    serial_pc.println(args);
+    serialize(serial_pc, REPORT_ATM_CALIB_DONE, REPORT_END);
+    // serial_pc.println("ATM ACK'ed");
+    // serial_pc.println(args);
   }else{
-    serial_pc.println("err5");
+    report_error("Unexpected Guage Response");
   }
 
   current_query = EGaugeQuery::None;
@@ -202,8 +224,7 @@ void process_gauage_ack(char* args)
 void process_gauage_nak(char* args)
 {
   int i = atoi(args);
-  serial_pc.print("NAK: ");
-  serial_pc.println(i);
+  report_error("NAK");
   current_query = EGaugeQuery::None;
 }
 
@@ -227,17 +248,17 @@ void process_pressure_message()
         }else if(buffer[0] == 'N' && buffer[1] == 'A' && buffer[2] == 'K') {
           process_gauage_nak(acknak+3);
         }else{
-          serial_pc.println("err4");  
+          report_error("Unexpected guage Response");
         }
       }else{
-        serial_pc.println("err3");
+        report_error("Unexpected guage Prefix");
       }
     }else{
-      serial_pc.println("err2");
+      report_error("No data from guage after start");
     }
   }else{
     // error
-    serial_pc.println("err1");
+    serial_pc.println("Unexpected guage starting charector");
   }
 }
 
@@ -274,9 +295,7 @@ void process_pc_command()
 
 void send_pc_report()
 {
-  // serial_pc.println("sending...");
   send_gauge_query(EGaugeQuery::PR4);
-  // serial_pressure.print(P_QUERY_PRESSURE);
   time_last_status = millis();
 }
 

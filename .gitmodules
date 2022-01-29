@@ -1,0 +1,6 @@
+[submodule "open_sem_pc/serial"]
+	path = open_sem_pc/serial
+	url = git@github.com:edwin-tomboza/serial.git
+[submodule "open_sem_pc/asyncplusplus"]
+	path = open_sem_pc/asyncplusplus
+	url = git@github.com:Amanieu/asyncplusplus.git
