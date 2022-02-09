@@ -322,6 +322,7 @@ void setup() {
   setup_io();
   start_idle();
   pixels.begin();
+  pixels.setBrightness(20);
 }
 
 void rainbow() {
@@ -354,7 +355,7 @@ void throb(long hue, float progress)
 {
   const float v = progress < 0.5 ? progress : 1.0 - progress;
   for(uint16_t i=0; i < pixels.numPixels(); i++) {
-    pixels.setPixelColor(i, pixels.ColorHSV(hue, 255, uint8_t(v*100.0) ));
+    pixels.setPixelColor(i, pixels.ColorHSV(hue, 255, uint8_t(v*255.0) ));
   }
   pixels.show();
 }

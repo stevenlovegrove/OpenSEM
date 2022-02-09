@@ -5,6 +5,7 @@
 #include <pangolin/plot/plotter.h>
 #include <pangolin/display/widgets.h>
 #include <pangolin/display/default_font.h>
+#include <pangolin/utils/timer.h>
 
 #include <serial/serial.h>
 #include <async++.h>
@@ -12,144 +13,188 @@
 #include <thread>
 #include <future>
 
+#include "rate_limited_function_call.h"
+#include "serial_controller.h"
+#include "Hp6624a.h"
+#include "KilovoltsHR30.h"
+#include "vacuum_controller.h"
+#include "exp_fit.h"
+
 // TODO:
-// * survive serial port opens / closes
-// * show serial port status
-// * have time on x-axis for plot
-// * add events as markers on plot
-// * switch to instance voltage setting. Reset voltage slider during idle etc.
-// * eta based on exponential fit of recent data
 // * create re-viewable log of events / pressure / voltage
+
+std::array<double,2> datalog_exp_fit(const pangolin::DataLog& log, size_t last_k_samples)
+{
+    assert(log.LastBlock()->Dimensions() == 2);
+    const size_t n = log.Samples();
+
+    std::deque<std::array<double,2>> data;
+    for(size_t i=0; i < std::min(n, last_k_samples); ++i)
+    {
+        const float* vec = log.Sample(n-1-i);
+        data.push_back({vec[0], vec[1]});
+    }
+
+    return exp_fit(data);
+}
 
 int main( int /*argc*/, char** /*argv*/ )
 {
+    auto ports = AvailablePorts();
+    for(const auto& p : ports) {
+        std::cout << p << std::endl;
+    }
+
+    const char* sem_hp = "/dev/cu.usbserial-110";
     const char* sem_vac = "/dev/cu.usbmodem1301";
     const char* sem_hv = "/dev/cu.usbserial-120";
 
-    serial::Serial serial_vac;
-    serial::Serial serial_hv;
-    async::cancellation_token stop_all;
 
-    serial_vac.setPort(sem_vac);
-    serial_hv.setPort(sem_hv);
-
-    pangolin::DataLog pressure_log;
-    float current_pressure;
-
-    auto pressure_task = async::spawn([&](){
-        while(true) {
-            try {
-                std::cout << "llop" << std::endl;
-                if(!serial_vac.isOpen()) {
-                    serial_vac.open();
-                }
-                if(serial_vac.waitReadable()) {
-                    std::string r = serial_vac.readline();
-                    if(r.size() > 0) {
-                        if(r[0] == 'P' && r.size() == 6) {
-                            const float f = *((float*)&(r[1]));
-                            pressure_log.Log(f);
-                            current_pressure = f;
-                        }
-                    }
-                }
-            } catch (std::exception& e) {
-                std::cout << e.what() << std::endl;
-            }
-            async::interruption_point(stop_all);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    });
+    Hp6624a hp_supply(sem_hp, 7);
+    KilovoltsHR30 hv_supply(sem_hv);
+    VacuumController vacuum(sem_vac);
 
     pangolin::CreateWindowAndBind("Main",640,480);
     glEnable(GL_DEPTH_TEST);
 
     const int UI_WIDTH = 40* pangolin::default_font().MaxWidth();
 
-    pangolin::CreatePanel("ui")
-      .SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(UI_WIDTH));
+    pangolin::Panel panel("ui");
+    panel.SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(UI_WIDTH));
 
-    pangolin::Plotter plot_pressure(&pressure_log, 0, 600, 0, 850, 60, 100);
+    pangolin::DataLog pressure_log;
+    pangolin::DataLog pressure_fit;
+    pangolin::Plotter plot_pressure(&pressure_log, 0, 600, 0, 800, 10, 1e-4);
+    plot_pressure.ClearSeries();
+    plot_pressure.AddSeries("$0", "$1");
     plot_pressure.SetBounds(0.0, 1.0, pangolin::Attach::Pix(UI_WIDTH), 1.0);
     plot_pressure.AddMarker(pangolin::Marker::Direction::Horizontal, 0.8);
     plot_pressure.AddMarker(pangolin::Marker::Direction::Horizontal, 1e-4);
+    plot_pressure.AddSeries("$0", "$1", pangolin::DrawingModeDashed, pangolin::Colour::Unspecified(), "fit", &pressure_fit);
 
-    pangolin::DisplayBase().AddDisplay(plot_pressure);
+    double refresh_fit = false;
+    std::array<double,2> exp_fit = {0.0, 0.0};
 
-    auto ser_write  =[&](serial::Serial& port, const char* packet)
-    {
-        try {
-            if(!port.isOpen()) {
-                port.open();
-            }
-            if(port.write((uint8_t*)packet, 2) != 2) {
-                std::cerr << "Didn't write all of packet" << std::endl;
-            }
-        }  catch (std::exception& e) {
-            // problem with port
-            port.close();
-        }
-    };
+    // Setup logging of pressure output
+    const float program_start = pangolin::TimeNow_s();
+    vacuum.on_pressure_reading_torr.connect([&](double pressure_torr){
+        const float t = pangolin::TimeNow_s() - program_start;
+        pressure_log.Log(t, pressure_torr);
+        exp_fit = datalog_exp_fit(pressure_log, 30);
+        std::cout << exp_fit[0] << std::endl;
+        std::cout << exp_fit[1] << std::endl;
+        refresh_fit = true;
+    });
 
-    auto write_hv = [&](const char* packet){ser_write(serial_hv, packet);};
-    auto write_vac = [&](const char* packet){ser_write(serial_vac, packet);};
-
-    auto vac_idle    = [&](){write_vac("==");};
-    auto vac_rough   = [&](){write_vac("<<");};
-    auto vac_turbo   = [&](){write_vac("<+");};
-    auto vac_vent    = [&](){write_vac(">+");};
-    auto vac_set_atm = [&](){write_vac("CA");};
-
-    auto hv_idle = [&](){write_hv("..");};
-    auto hv_on   = [&](){write_hv("!!");};
-    auto hv_set_voltage = [&](float voltage) {
-        if(0 <= voltage && voltage <= 30000) {
-            const float val_f = 256.0 * voltage / 30000.0;
-            char packet[2];
-            packet[0] = 'V';
-            packet[1] = static_cast<char>(val_f);
-            write_hv(packet);
-        }
-    };
+    pangolin::DisplayBase().AddDisplay(panel).AddDisplay(plot_pressure);
 
     auto idle_all = [&](){
-        vac_idle();
-        hv_idle();
+        hv_supply.idle();
+        hp_supply.idle();
+        vacuum.idle();
     };
 
-    pangolin::Var<bool> connected_hv("ui.connected_HV", false, pangolin::META_FLAG_READONLY | pangolin::META_FLAG_TOGGLE);
-    pangolin::Var<bool> connected_vac("ui.connected_VAC", false, pangolin::META_FLAG_READONLY | pangolin::META_FLAG_TOGGLE);
+    pangolin::Var<bool> connected_hv("ui.Connected_High_Voltage", false, pangolin::META_FLAG_READONLY | pangolin::META_FLAG_TOGGLE);
+    pangolin::Var<bool> connected_hp("ui.Connected_Coil_Power", false, pangolin::META_FLAG_READONLY | pangolin::META_FLAG_TOGGLE);
+    pangolin::Var<bool> connected_vac("ui.Connected_Vacuum", false, pangolin::META_FLAG_READONLY | pangolin::META_FLAG_TOGGLE);
+
+
+    pangolin::Var<double> current_pressure("ui.Pressure", 0.0, pangolin::META_FLAG_READONLY | pangolin::META_FLAG_TOGGLE);
+    pangolin::Var<std::function<void(void)>>("ui.Idle", [&](){vacuum.idle();});
+    pangolin::Var<std::function<void(void)>>("ui.Rough", [&](){vacuum.rough();});
+    pangolin::Var<std::function<void(void)>>("ui.Turbo", [&](){vacuum.turbo();});
+    pangolin::Var<std::function<void(void)>>("ui.Vent",  [&](){vacuum.vent();});
+    pangolin::Var<std::function<void(void)>>("ui.Set_ATM", [&](){vacuum.calibrate_atmospheric();});
+
 
     pangolin::Var<std::string>("ui.Vacuum","", pangolin::META_FLAG_READONLY);
 
-    pangolin::Var<float>::Attach("ui.Pressure", current_pressure, 0.0, 800);
-    pangolin::Var<std::function<void(void)>>("ui.Idle", vac_idle);
-    pangolin::Var<std::function<void(void)>>("ui.Rough", vac_rough);
-    pangolin::Var<std::function<void(void)>>("ui.Turbo", vac_turbo);
-    pangolin::Var<std::function<void(void)>>("ui.Vent",  vac_vent);
-    pangolin::Var<std::function<void(void)>>("ui.Set_ATM", vac_set_atm);
 
-    pangolin::Var<std::string>("ui.Acc Voltage","", pangolin::META_FLAG_READONLY);
-    pangolin::Var<std::function<void(void)>>("ui.HT_off", hv_idle);
-    pangolin::Var<std::function<void(void)>>("ui.HT_on", hv_on);
-    pangolin::Var<float> ui_voltage("ui.HT_Voltage", 0.0, 0.0, 1000.0);
-    pangolin::Var<std::function<void(void)>>("ui.Set_Voltage", [&](){
-        hv_set_voltage(ui_voltage);
-    });
+    pangolin::Var<bool> enable_hv("ui.Enable_HV", false, true);
+    pangolin::Var<std::string>("ui.Acceleration","", pangolin::META_FLAG_READONLY);
 
-    pangolin::RegisterKeyPressCallback(' ', idle_all);
+    pangolin::Var<double> coil_condensor1("ui.condensor1_voltage", 0.0, 0.0, 4.0);
+    pangolin::Var<double> coil_condensor2("ui.condensor2_voltage", 0.0, 0.0, 4.0);
+    pangolin::Var<double> coil_objective("ui.objective_voltage",  0.0, 0.0, 4.0);
+    pangolin::Var<double> coil_max_current("ui.coil_current",  0.0, 0.0, 2.0);
+    pangolin::Var<bool> enable_amp("ui.Enable_Amp", false, true);
+    pangolin::Var<bool> enable_coils("ui.Enable_Coils", false, true);
+    pangolin::Var<std::string>("ui.Coils","", pangolin::META_FLAG_READONLY);
+
+    RateLimitedFunctionCall<> update_supply_vars(
+        [&](){
+            hp_supply.set_max_voltage(1, coil_condensor1);
+            hp_supply.set_max_voltage(2, coil_condensor2);
+            hp_supply.set_max_voltage(3, coil_objective);
+            for(int i=1; i <= 3; ++i) {
+                hp_supply.set_max_current(i, coil_max_current);
+            }
+        }, 0.1
+    );
+
+
+    pangolin::RegisterKeyPressCallback(pangolin::PANGO_SPECIAL + pangolin::PANGO_KEY_TAB, idle_all);
 
     while( !pangolin::ShouldQuit() )
     {
-        connected_hv = serial_hv.isOpen();
-        connected_vac = serial_vac.isOpen();
+        // Connection status
+        connected_hv = hv_supply.is_connected();
+        connected_hp = hp_supply.is_connected();
+        connected_vac = vacuum.is_connected();
+
+        // High-voltage supply logic
+        if(hv_supply.is_connected()) {
+            if(hv_supply.is_high_voltage_on() != enable_hv) {
+                hv_supply.set_on_off(enable_hv);
+            }
+        }else{
+            enable_hv = false;
+        }
+
+        // HP Power supply logic
+        if(hp_supply.is_connected())
+        {
+            if(coil_condensor1.GuiChanged() || coil_condensor2.GuiChanged() || coil_objective.GuiChanged() || coil_max_current.GuiChanged()) {
+                update_supply_vars();
+            }
+            if(enable_amp.GuiChanged()) {
+                if(enable_amp) {
+                    hp_supply.set_max_voltage(4, 32);
+                    hp_supply.set_max_current(4, 0.5);
+                }
+                hp_supply.set_on_off(4, enable_amp);
+            }
+            if(enable_coils.GuiChanged()) {
+                if(enable_coils) {
+                    update_supply_vars();
+                }
+                hp_supply.set_on_off(1, enable_coils);
+                hp_supply.set_on_off(2, enable_coils);
+                hp_supply.set_on_off(3, enable_coils);
+            }
+        }else{
+            enable_amp = false;
+            enable_coils = false;
+        }
+
+        // Vacuum controller logic.
+        current_pressure = vacuum.pressure();
+
+        if(refresh_fit) {
+            refresh_fit = false;
+            pressure_fit.Clear();
+            const double now = pangolin::TimeNow_s() - program_start;
+            for(double time = now-30.0; time < now+180; time += 0.5)
+            {
+                pressure_fit.Log(time, exp_fit[1] * exp(exp_fit[0] * time));
+            }
+        }
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         pangolin::FinishFrame();
     }
 
-    stop_all.cancel();
-    pressure_task.wait();
+    idle_all();
 
     return 0;
 }
