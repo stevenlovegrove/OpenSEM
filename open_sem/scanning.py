@@ -1,4 +1,7 @@
-from nmigen import *
+import os
+from amaranth import *
+from amaranth.sim import Simulator
+
 
 # Drive the x,y deflection beams for raster scanning.
 # The DAC for the y-deflection is driven directly.
@@ -24,7 +27,7 @@ class PixelScan(Elaboratable):
         ############ IN: State Control
         # Pull high to hold raster. Will start scanning on first clock low.
         # Whilst on hold, scan config will be latched in
-        self.hold = Signal()
+        self.hold = Signal(reset=1)
 
         ############ OUT: Running Status
         # Discrete x, y position relative to width, height
@@ -56,7 +59,7 @@ class PixelScan(Elaboratable):
         # signal is applied. Scanning begins when this goes low.
         # blank_x and blank_y are asserted at end of the rows and whole
         # image respectively
-        with m.FSM() as fsm:
+        with m.FSM(domain="pixel") as fsm:
             with m.State("HOLD"):
                 m.d.pixel += [
                     # Sync user config
@@ -92,6 +95,7 @@ class PixelScan(Elaboratable):
                     with m.If(self.pos_y > 0):
                         m.d.pixel += [
                             # Move y deflector beam
+                            self.pos_y.eq(self.pos_y - 1),
                             self.dac_y.eq(self.dac_y + self.y_grad)
                         ]
                         m.next = "ROW_BLANK"
@@ -109,3 +113,26 @@ class PixelScan(Elaboratable):
                 m.next = "SCAN"
 
         return m
+   
+def sim_pixelscan_1():
+    dut = PixelScan()
+    sim = Simulator(dut)
+    sim.add_clock(1e-6/100,domain="pixel")
+
+    def loopback_proc():
+        yield dut.x_steps.eq(10)
+        yield dut.y_steps.eq(20)
+        yield dut.y_grad.eq(130)
+        yield
+        yield dut.hold.eq(0)
+        while True:
+            yield
+        
+    sim.add_sync_process(loopback_proc, domain="pixel")
+    
+    os.makedirs("sim", exist_ok=True)
+    with sim.write_vcd("sim/pixelscan_1.vcd"):
+        sim.run_until(1e-3) # 1ms
+        
+if __name__ == "__main__":
+    sim_pixelscan_1()

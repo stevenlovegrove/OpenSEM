@@ -1,16 +1,16 @@
-from nmigen import *
+from amaranth import *
 
 # Define derived samples from backscatter quadrant measurements
 # We will be able to stream these derived samples alongside the raw
 class Backscatter(Elaboratable):
-    def __init__(self, quadrant_signals):
+    def __init__(self, quadrant_bits):
         assert(len(quadrant_signals) == 4)
 
         # in: ADC Samples from backscatter quadrants
-        self.xy_00 = quadrant_signals[0]
-        self.xy_10 = quadrant_signals[1]
-        self.xy_01 = quadrant_signals[2]
-        self.xy_11 = quadrant_signals[3]
+        self.xy_00 = Signal(quadrant_bits)
+        self.xy_10 = Signal(quadrant_bits)
+        self.xy_01 = Signal(quadrant_bits)
+        self.xy_11 = Signal(quadrant_bits)
 
         # out: Derived signals
         self.sum    = Signal.like(self.xy_00+self.xy_10+self.xy_01+self.xy_11)
