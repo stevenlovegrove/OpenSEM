@@ -56,13 +56,13 @@ class Top(Elaboratable):
         #   pixel is derived from sync, possibly the same
         m.domains.sync = ClockDomain("sync")
         m.domains.pixel = ClockDomain("pixel")
-        m.domains.ftdi = ClockDomain("ftdi")
+        
+        counter = Signal(16)
         
         m.d.comb += [
             # Let's just set the pixel clock equal to main clock for now          
             ClockSignal(domain="sync").eq(board_clock),
             ClockSignal(domain="pixel").eq(board_clock),
-            ClockSignal(domain="ftdi").eq(m.submodules.ft600.ftdi.clk),
             
             m.submodules.pixel_scan.x_steps.eq(C(4095)),
             m.submodules.pixel_scan.y_steps.eq(C(4095)),
@@ -70,13 +70,14 @@ class Top(Elaboratable):
             m.submodules.ledbar.value.eq(m.submodules.xadc.adc_sample_value),
             leds.eq(m.submodules.ledbar.bar),
 
-            # # Stream counter out over USB
-            # m.submodules.ft600.fifo_to_f60x.w_data.eq(Cat(counter, C(11))),
-            # m.submodules.ft600.fifo_to_f60x.w_en.eq(1)
+            # Stream counter out over USB
+            m.submodules.ft600.fifo_to_f60x.w_data.eq(Cat(counter, C(11))),
+            m.submodules.ft600.fifo_to_f60x.w_en.eq(1)
         ]
          
         m.d.pixel += [            
-            m.submodules.pixel_scan.hold.eq(0),           
+            m.submodules.pixel_scan.hold.eq(0),     
+            counter.eq(counter + 1)      
         ]
         
         return m

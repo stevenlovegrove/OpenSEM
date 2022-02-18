@@ -7,7 +7,7 @@ from amaranth.lib.fifo import *
 # With inspiration from the Alchitry FT600 lucid example
 # FT601 definition remains untested.
 class FT60X_Sync245(Elaboratable):
-    def __init__(self, *, ftdi_resource, clk="sync", chip="ft600", fifo_depth_to_ft60x=512, fifo_depth_from_ft60x=8 ):        
+    def __init__(self, *, ftdi_resource, clk="sync", chip="ft600", fifo_depth_to_ft60x=128, fifo_depth_from_ft60x=8 ):        
         match chip:
             case "ft600": self.data_bytes = 2
             case "ft601": self.data_bytes = 4
@@ -24,10 +24,10 @@ class FT60X_Sync245(Elaboratable):
         self.fifo_depth_from_ft60x = fifo_depth_from_ft60x
 
         # Read and write fifos (user should use 'sync' side of FIFO only. 'ftdi' side is managed by module)
-        # self.fifo_from_f60x = AsyncFIFOBuffered(width=self.fifo_width, depth=self.fifo_depth_from_ft60x, r_domain=clk, w_domain="ftdi")    
-        # self.fifo_to_f60x   = AsyncFIFOBuffered(width=self.fifo_width, depth=self.fifo_depth_to_ft60x, r_domain="ftdi", w_domain=clk)
+        self.fifo_from_f60x = AsyncFIFOBuffered(width=self.fifo_width, depth=self.fifo_depth_from_ft60x, r_domain=clk, w_domain="ftdi")    
+        self.fifo_to_f60x   = AsyncFIFOBuffered(width=self.fifo_width, depth=self.fifo_depth_to_ft60x, r_domain="ftdi", w_domain=clk)
 
-    def elaborate(self, platform):
+    def elaborate_(self, platform):
         m = Module()
         
         m.d.comb += [
@@ -42,8 +42,10 @@ class FT60X_Sync245(Elaboratable):
         return m
 
             
-    def elaborate_(self, platform):
+    def elaborate(self, platform):
         m = Module()
+        
+        m.domains.ftdi = ClockDomain("ftdi")
         
         # Async fifo's allow us to transfer data between clock domains
         m.submodules.fifo_from_f60x = self.fifo_from_f60x
@@ -51,10 +53,10 @@ class FT60X_Sync245(Elaboratable):
         
         can_pull = Signal()
         can_push = Signal()
-        
-        clk = Signal()
-        
+
         m.d.comb += [
+            ClockSignal(domain="ftdi").eq(self.ftdi.clk),
+
             # ftdi side of fifos are always tied to ft_data (in/out)
             m.submodules.fifo_from_f60x.w_data.eq( Cat(self.ftdi.data.i, self.ftdi.be.i) ),
             Cat(self.ftdi.data.o, self.ftdi.be.o).eq(m.submodules.fifo_to_f60x.r_data),
@@ -62,13 +64,11 @@ class FT60X_Sync245(Elaboratable):
             # Tristate set to output only when ft_wr is high
             self.ftdi.data.oe.eq(self.ftdi.wr),
             self.ftdi.be.oe.eq(self.ftdi.wr),
-            self.ftdi.oe.eq(self.ftdi.wr),
+            self.ftdi.oe.eq(~self.ftdi.wr),
             
             # can push / pull when data is available and we have somewhere to put it
             can_pull.eq(self.ftdi.rxf & self.fifo_from_f60x.w_rdy),
             can_push.eq(self.ftdi.txe & self.fifo_to_f60x.r_rdy),
-            
-            clk.eq(ClockSignal(self.clk))
         ]
         
         with m.FSM(domain="ftdi") as fsm:
@@ -79,17 +79,18 @@ class FT60X_Sync245(Elaboratable):
                     m.submodules.fifo_to_f60x.r_en.eq(0)
                 ]
                 
-                # Prioritize reading if ft60x has data and our read fifo isn't full
-                with m.If(can_pull):                    
-                    m.d.ftdi += [
-                        # Let ft60x control bus, request read from ft60x
-                        self.ftdi.rd.eq(1),
-                        self.ftdi.wr.eq(0)
-                    ]
-                    m.next = "PULL"
+                # # Prioritize reading if ft60x has data and our read fifo isn't full
+                # with m.If(can_pull):                    
+                #     m.d.ftdi += [
+                #         # Let ft60x control bus, request read from ft60x
+                #         self.ftdi.rd.eq(1),
+                #         self.ftdi.wr.eq(0)
+                #     ]
+                #     m.next = "PULL"
                     
                 # Otherwise we start writing if the ft60x isn't full and the fpga has data
-                with m.Elif(can_push):
+                # with m.Elif(can_push):
+                with m.If(can_push):
                     m.d.ftdi += [
                         # Let fpga control bus, request write from ft60x
                         self.ftdi.rd.eq(0),
@@ -97,18 +98,18 @@ class FT60X_Sync245(Elaboratable):
                     ]
                     m.next = "PUSH"
 
-            with m.State("PULL"):
-                # on the current rising edge, ft_rd=1 and ft60x has presented data
+            # with m.State("PULL"):
+            #     # on the current rising edge, ft_rd=1 and ft60x has presented data
                 
-                m.d.ftdi += [
-                    # trigger fifo.push next cycle
-                    m.submodules.fifo_from_f60x.w_en.eq(1)
-                ]
+            #     m.d.ftdi += [
+            #         # trigger fifo.push next cycle
+            #         m.submodules.fifo_from_f60x.w_en.eq(1)
+            #     ]
 
-                # TODO: optimize to avoid IDLE if PUSH is possible
-                with m.If(~can_pull):                    
-                    m.next = "IDLE"
-                    m.d.ftdi += [ self.ftdi.rd.eq(0)]
+            #     # TODO: optimize to avoid IDLE if PUSH is possible
+            #     with m.If(~can_pull):                    
+            #         m.next = "IDLE"
+            #         m.d.ftdi += [ self.ftdi.rd.eq(0)]
             
             with m.State("PUSH"):
                 # on the current rising edge, ft_wr=1 and ft60x latched data from fifo
@@ -120,7 +121,8 @@ class FT60X_Sync245(Elaboratable):
                 
                 # Prioritize pulls if possible
                 # TODO: optimize to avoid IDLE if PULL is possible
-                with m.If(~can_push | can_pull):                    
+                # with m.If(~can_push | can_pull):                    
+                with m.If(~can_push):                    
                     m.next = "IDLE"
                     m.d.ftdi += [ self.ftdi.wr.eq(0)]
                 pass            
