@@ -33,7 +33,7 @@ from amaranth.sim import Simulator
 
 # Configure the Internal Xilinx ADC for continuous single channel sampling
 class XADC(Elaboratable):
-    def __init__(self, vp, vn):
+    def __init__(self, diff_pair):
         # continuously sample from VP/VN
         self.channel = C(0x03) 
         
@@ -44,8 +44,8 @@ class XADC(Elaboratable):
         self.adc_sample_value = Signal(12) 
         
         # Module Input
-        self.vp = vp
-        self.vn = vn
+        self.vp = diff_pair.p
+        self.vn = diff_pair.n
         
         ############################################################
         ## Signals from XADC sub-module
