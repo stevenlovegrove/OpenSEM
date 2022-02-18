@@ -91,22 +91,22 @@ public:
         set_channel_val("iset", channel, current_amps);
     }
 
-    double get_max_voltage(u_int8_t channel)
+    double get_max_voltage(uint8_t channel)
     {
         return get_channel_val("vset", channel);
     }
 
-    double get_max_current(u_int8_t channel)
+    double get_max_current(uint8_t channel)
     {
         return get_channel_val("iset", channel);
     }
 
-    double get_voltage(u_int8_t channel)
+    double get_voltage(uint8_t channel)
     {
         return get_channel_val("vout", channel);
     }
 
-    double get_current(u_int8_t channel)
+    double get_current(uint8_t channel)
     {
         return get_channel_val("iout", channel);
     }

@@ -53,7 +53,7 @@ public:
 
     void set_voltage(uint8_t voltage)
     {
-        std::string packet('\0', 2);
+        std::string packet('\0', (size_t)2);
         packet[0] = 'V';
         packet[1] = static_cast<char>(voltage);
         controller.send(packet);
