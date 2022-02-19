@@ -14,5 +14,9 @@ add_subdirectory(asyncplusplus)
 
 add_executable(SEM main.cpp)
 
-target_link_libraries(SEM Threads::Threads serial Async++ pango_display pango_plot)
+target_link_libraries(SEM Threads::Threads serial Async++ pango_display pango_plot pango_image)
 target_include_directories(SEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/serial/include)
+
+# FTDI Library
+target_include_directories(SEM PRIVATE "/Users/stevenlovegrove/code/ftdi")
+target_link_libraries(SEM "/usr/local/lib/libftd3xx.dylib")

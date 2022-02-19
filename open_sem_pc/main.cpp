@@ -6,6 +6,7 @@
 #include <pangolin/display/widgets.h>
 #include <pangolin/display/default_font.h>
 #include <pangolin/utils/timer.h>
+#include <pangolin/display/image_view.h>
 
 #include <serial/serial.h>
 #include <async++.h>
@@ -19,6 +20,7 @@
 #include "KilovoltsHR30.h"
 #include "vacuum_controller.h"
 #include "exp_fit.h"
+#include "scan_controller.h"
 
 // TODO:
 // * create re-viewable log of events / pressure / voltage
@@ -38,12 +40,34 @@ std::array<double,2> datalog_exp_fit(const pangolin::DataLog& log, size_t last_k
     return exp_fit(data);
 }
 
+void test()
+{
+    pangolin::CreateWindowAndBind("Main",640,480);
+    glEnable(GL_DEPTH_TEST);
+
+    pangolin::ImageView view;
+    pangolin::DisplayBase().AddDisplay(view);
+
+//    auto image = pangolin::LoadImage("/Users/stevenlovegrove/Downloads/test.jpeg");
+    pangolin::ManagedImage<uint16_t> image(512,512);
+
+    while( !pangolin::ShouldQuit() )
+    {
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        view.SetImage(image);
+        pangolin::FinishFrame();
+    }
+}
+
 int main( int /*argc*/, char** /*argv*/ )
 {
-    auto ports = AvailablePorts();
-    for(const auto& p : ports) {
-        std::cout << p << std::endl;
-    }
+//    auto ports = AvailablePorts();
+//    for(const auto& p : ports) {
+//        std::cout << p << std::endl;
+//    }
+
+//    test();
+//    return 0;
 
     const char* sem_hp = "/dev/cu.usbserial-110";
     const char* sem_vac = "/dev/cu.usbmodem1301";
@@ -53,21 +77,23 @@ int main( int /*argc*/, char** /*argv*/ )
     Hp6624a hp_supply(sem_hp, 7);
     KilovoltsHR30 hv_supply(sem_hv);
     VacuumController vacuum(sem_vac);
+    ScanController scanner;
 
     pangolin::CreateWindowAndBind("Main",640,480);
     glEnable(GL_DEPTH_TEST);
 
-    const int UI_WIDTH = 40* pangolin::default_font().MaxWidth();
+    const auto ui_width = pangolin::Attach::Pix(40* pangolin::default_font().MaxWidth());
 
     pangolin::Panel panel("ui");
-    panel.SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(UI_WIDTH));
+    panel.SetBounds(0.0, 1.0, 0.0, ui_width);
 
     pangolin::DataLog pressure_log;
     pangolin::DataLog pressure_fit;
+    pangolin::View container;
+    pangolin::ImageView image_view;
     pangolin::Plotter plot_pressure(&pressure_log, 0, 600, 0, 800, 10, 1e-4);
     plot_pressure.ClearSeries();
     plot_pressure.AddSeries("$0", "$1");
-    plot_pressure.SetBounds(0.0, 1.0, pangolin::Attach::Pix(UI_WIDTH), 1.0);
     plot_pressure.AddMarker(pangolin::Marker::Direction::Horizontal, 0.8);
     plot_pressure.AddMarker(pangolin::Marker::Direction::Horizontal, 1e-4);
     plot_pressure.AddSeries("$0", "$1", pangolin::DrawingModeDashed, pangolin::Colour::Unspecified(), "fit", &pressure_fit);
@@ -86,7 +112,14 @@ int main( int /*argc*/, char** /*argv*/ )
         refresh_fit = true;
     });
 
-    pangolin::DisplayBase().AddDisplay(panel).AddDisplay(plot_pressure);
+    container.SetLayout(pangolin::LayoutEqual)
+            .SetBounds(0.0, 1.0, ui_width, 1.0)
+            .SetHandler(&pangolin::StaticHandler)
+            .AddDisplay(image_view)
+            .AddDisplay(plot_pressure);
+
+
+    pangolin::DisplayBase().AddDisplay(panel).AddDisplay(container);
 
     auto idle_all = [&](){
         hv_supply.idle();
@@ -120,6 +153,7 @@ int main( int /*argc*/, char** /*argv*/ )
     pangolin::Var<bool> enable_amp("ui.Enable_Amp", false, true);
     pangolin::Var<bool> enable_coils("ui.Enable_Coils", false, true);
     pangolin::Var<std::string>("ui.Coils","", pangolin::META_FLAG_READONLY);
+    pangolin::Var<double>::Attach("ui.ftdi_MBPS", scanner.mbps);
 
     RateLimitedFunctionCall<> update_supply_vars(
         [&](){
@@ -189,6 +223,8 @@ int main( int /*argc*/, char** /*argv*/ )
                 pressure_fit.Log(time, exp_fit[1] * exp(exp_fit[0] * time));
             }
         }
+
+        image_view.SetImage(scanner.image);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         pangolin::FinishFrame();
