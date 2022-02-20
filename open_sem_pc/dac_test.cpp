@@ -16,7 +16,7 @@
 struct RC
 {
     RC(double v_0, double tau)
-        : tau(tau), v_out(v_0)
+        : v_out(v_0), tau(tau)
     {
     }
 
@@ -48,58 +48,65 @@ struct RC
 //        return v0 * exp(-t/tau);
 //    }
 
-    double tau;
     double v_out;
+    double tau;
 };
 
 
 struct DAC
 {
-    DAC(size_t n)
-        : n(n)
+    DAC(double rc_tau = 1.0)
+        : rc(0.0, rc_tau)
     {
 
     }
 
-    bool clock(double signal)
+    bool clock(double delta_t, double signal)
     {
-        current_avg = avg();
-        const bool out = signal > current_avg;
-        dac_hist.push_back(out);
-        if( dac_hist.size() > n ) dac_hist.pop_front();
-        return out;
+        const bool s = signal > rc.v_out;
+        rc.step(delta_t, s ? 1.0 : 0.0);
+        return s;
     }
 
-    double avg()
-    {
-        double sum = 0;
-        double max = 0;
-
-        const size_t els = dac_hist.size();
-        for(int i=0; i < els; ++i) {
-            double w = double(els-i) / els;
-            double val = dac_hist[els-i-1] * w;
-            max += w;
-            sum += val;
-        }
-//        for(bool b : dac_hist) {
-//            if(b) ++sum;
-//        }
-        return sum / max;
-    }
-
-    double current_avg;
-    size_t n;
-    std::deque<bool> dac_hist;
+    RC rc;
 };
+
+double sawtooth(double t, double period)
+{
+    const double n = std::floor(t / period);
+    const double frac = (t - n*period)/period;
+    return frac;
+}
+
+double ppm(double t, double period, double duty_frac)
+{
+    return sawtooth(t, period) < duty_frac ? 1.0 : 0.0;
+}
+
+double sin(double t, double period)
+{
+    return 0.5 + std::sin(M_PI * t / period) / 2.0;
+}
+
+double some_func(double t)
+{
+    if(t < 1.0) return 0.1 + 0.5*sawtooth(t, 0.001);
+    if(t < 2.0) return 0.1 + 0.2*ppm(t, 0.02, 0.2);
+    if(t < 3.0) return 0.2 + 0.3*sin(t, 0.0001);
+    return sin(t, 0.1);
+}
 
 int main( int /*argc*/, char** /*argv*/ )
 {
     pangolin::CreateWindowAndBind("Main",640,480);
     glEnable(GL_DEPTH_TEST);
 
-    const size_t n = 1 << 12;
-    std::cout << n << std::endl;
+    constexpr double fps = 30;
+    constexpr double h = 480;
+    constexpr double w = 640;
+    constexpr double delta_t = 1.0 / (100e6);
+    constexpr double sim_time = delta_t * 1e6;
+
 
     const auto ui_width = pangolin::Attach::Pix(40* pangolin::default_font().MaxWidth());
 
@@ -107,14 +114,18 @@ int main( int /*argc*/, char** /*argv*/ )
     panel.SetBounds(0.0, 1.0, 0.0, ui_width);
 
     pangolin::DataLog dac_log;
-    pangolin::Plotter plot_dac(&dac_log, 0, 600, 0, 1.0, 1.0, 1.0);
+    pangolin::Plotter plot_dac(&dac_log, 0.0, sim_time, 0, 1.0, 1.0/100e6, 1.0 / (1<<16));
+    plot_dac.ClearSeries();
+    plot_dac.AddSeries("$0", "$1", pangolin::DrawingModeLine, pangolin::Colour::Unspecified(), "Signal");
+    plot_dac.AddSeries("$0", "$2", pangolin::DrawingModePoints, pangolin::Colour::Unspecified(), "dac");
+    plot_dac.AddSeries("$0", "$3", pangolin::DrawingModeLine, pangolin::Colour::Unspecified(), "filter_perfect");
+    plot_dac.AddSeries("$0", "$4", pangolin::DrawingModeLine, pangolin::Colour::Unspecified(), "error");
 
     plot_dac.SetBounds(0.0, 1.0, ui_width, 1.0);
     pangolin::DisplayBase().AddDisplay(panel).AddDisplay(plot_dac);
 
-    pangolin::Var<double> signal("ui.level", 0, 0, 1.0);
-
-    DAC dac(n);
+    pangolin::Var<double> tau("ui.tau", 1e-6, 0, 1e-6);
+    pangolin::Var<double> real_tau_diff("ui.real_tau_diff", 0.0, -1.0, 1.0);
 
 //    if(true) {
 //        const double vin = 0.5;
@@ -136,12 +147,28 @@ int main( int /*argc*/, char** /*argv*/ )
 //        }
 //    }
 
+    auto sim = [&](){
+        RC real_rc(0.0, real_tau_diff);
+        DAC dac(tau);
+
+        dac_log.Clear();
+
+        for(double t=0; t < sim_time; t += delta_t)
+        {
+            double signal = 0.4 + 0.25 * sawtooth(t, 1.0 / (fps) );//some_func(t);
+
+            const bool out = dac.clock(delta_t, signal);
+            real_rc.step(delta_t, out ? 1.0 : 0.0);
+
+            dac_log.Log( t, signal, out ? 1.0 : 0.0, dac.rc.v_out, std::abs(signal - dac.rc.v_out));
+        }
+    };
 
     while( !pangolin::ShouldQuit() )
     {
-        const bool out = dac.clock(signal);
-
-//        dac_log.Log( signal, out ? 1.0 : 0.0, dac.current_avg);
+        if(pangolin::GuiVarHasChanged()) {
+            sim();
+        }
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         pangolin::FinishFrame();
