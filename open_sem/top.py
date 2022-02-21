@@ -28,12 +28,6 @@ class Top(Elaboratable):
     
     def elaborate(self, platform):
         m = Module()
-        
-        # Interface to verilog module definitions
-        # Not sure if we're allowed to put this here?
-        # # https://lab.ktemkin.com/post/nmigen-instance/
-        # for filename in glob.glob("verilog/*.v"): 
-        #     platform.add_file(filename, open(filename))
 
         # Setup the submodules and connect their signals
         m.submodules.pixel_scan = PixelScan()

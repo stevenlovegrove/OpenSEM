@@ -4,7 +4,7 @@ from amaranth import *
 # We will be able to stream these derived samples alongside the raw
 class Backscatter(Elaboratable):
     def __init__(self, quadrant_bits):
-        assert(len(quadrant_signals) == 4)
+        assert(len(quadrant_bits) == 4)
 
         # in: ADC Samples from backscatter quadrants
         self.xy_00 = Signal(quadrant_bits)

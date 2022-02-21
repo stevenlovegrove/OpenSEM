@@ -13,8 +13,7 @@ class FT60X_Sync245(Elaboratable):
             case "ft601": self.data_bytes = 4
             case _: raise AssertionError("Unsupported chip type")
             
-         # We'll use the first (data_bytes-1) bits to store the validity mask, then the actual data
-         # We exclude the first bit of the mask since at least one byte must be valid to be in FIFO
+         # We'll use the first (data_bytes) bits to store the validity mask, then the actual data
         self.fifo_width = (self.data_bytes) + 8*self.data_bytes
         self.ftdi = ftdi_resource
         self.clk = clk
@@ -27,21 +26,6 @@ class FT60X_Sync245(Elaboratable):
         self.fifo_from_f60x = AsyncFIFOBuffered(width=self.fifo_width, depth=self.fifo_depth_from_ft60x, r_domain=clk, w_domain="ftdi")    
         self.fifo_to_f60x   = AsyncFIFOBuffered(width=self.fifo_width, depth=self.fifo_depth_to_ft60x, r_domain="ftdi", w_domain=clk)
 
-    def elaborate_(self, platform):
-        m = Module()
-        
-        m.d.comb += [
-            self.ftdi.data.o.eq(0x1234),
-            self.ftdi.be.o.eq(0b11),
-            self.ftdi.oe.eq(0),
-            self.ftdi.data.oe.eq(1),
-            self.ftdi.be.oe.eq(1),
-            self.ftdi.wr.eq(1)
-        ]
-        
-        return m
-
-            
     def elaborate(self, platform):
         m = Module()
         
