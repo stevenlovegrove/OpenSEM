@@ -57,8 +57,6 @@ class Top(Elaboratable):
         m.domains.sync = ClockDomain("sync")
         m.domains.pixel = ClockDomain("pixel")
         
-        counter = Signal(16)
-        
         m.d.comb += [
             # Let's just set the pixel clock equal to main clock for now          
             ClockSignal(domain="sync").eq(board_clock),
@@ -69,15 +67,17 @@ class Top(Elaboratable):
             
             m.submodules.ledbar.value.eq(m.submodules.xadc.adc_sample_value),
             leds.eq(m.submodules.ledbar.bar),
-
-            # Stream counter out over USB
-            m.submodules.ft600.fifo_to_f60x.w_data.eq(Cat(counter, C(11))),
-            m.submodules.ft600.fifo_to_f60x.w_en.eq(1)
         ]
+        
+        with m.If(m.submodules.xadc.adc_sample_ready):
+            m.d.sync += [
+                # Stream counter out over USB
+                m.submodules.ft600.fifo_to_f60x.w_data.eq( Cat( m.submodules.xadc.adc_sample_value, C(0000), C(11) ) ),
+                m.submodules.ft600.fifo_to_f60x.w_en.eq(1)
+            ]
          
         m.d.pixel += [            
             m.submodules.pixel_scan.hold.eq(0),     
-            counter.eq(counter + 1)      
         ]
         
         return m
