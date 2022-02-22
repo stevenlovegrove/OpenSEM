@@ -12,16 +12,9 @@ from amaranth.sim import *
 # ]
 
 class SignalFixedPoint:
-    class OpResult:
-        def __init__(self, s, frac_bits):
-            self.s = s
-            self.qf = frac_bits
-            
     # int_bits / frac_bits can also be negative to shift decimal outside of represented digits
     def __init__(self, int_bits, frac_bits, value=None, signed=None):
-        self.qi = int_bits
         self.qf = frac_bits
-        self.bits = self.qi + self.qf
         if value is None:
             if signed is None:
                 signed = False
