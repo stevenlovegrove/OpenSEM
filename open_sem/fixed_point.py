@@ -1,6 +1,7 @@
 from argparse import ArgumentError
 from amaranth import *
 from amaranth.sim import *
+from black import target_version_option_callback
 
 # Example of multiplication with truncation of fractional LSB's
 # m = module()
@@ -13,29 +14,49 @@ from amaranth.sim import *
 
 class SignalFixedPoint:
     # int_bits / frac_bits can also be negative to shift decimal outside of represented digits
-    def __init__(self, int_bits, frac_bits, value=None, signed=None):
+    def __init__(
+        self, 
+        int_bits : int = None,
+        frac_bits : int = 0,
+        constant=None,
+        signed=None,
+        *, value : Value = None,
+    ):
+        assert(frac_bits is not None)
         self.qf = frac_bits
+        
         if value is None:
-            if signed is None:
-                signed = False
-            self.s = Signal(Shape(self.bits, signed))
-        elif type(value) is float:
-            if signed is None:
-                signed = value < 0
-            elif signed == False and value < 0:
-                raise ArgumentError(signed, "Specified unsigned type for signed constant") 
-            v_int = round(value / self.lsb_value())
-            self.s = C(v_int, Shape(self.bits, signed))
-        pass
+            assert(int_bits is not None)
+
+            if constant is None:
+                if signed is None:
+                    signed = False
+                self.s = Signal(Shape(int_bits + frac_bits, signed))
+            elif isinstance(constant, float):
+                if signed is None:
+                    signed = constant < 0
+                elif signed == False and constant < 0:
+                    raise ArgumentError(signed, "Specified unsigned type for signed constant") 
+                self.s = C(self.to_binary(constant), Shape(int_bits + frac_bits, signed))
+            else:
+                assert(False)
+        else:
+            assert(constant is None)
+            assert(int_bits is None or int_bits == value.width)
+            assert(signed is None or signed == value.signed)
+            self.s = value
+    
+    def to_binary(self, v : float):
+        return round(v / self.lsb_value())
     
     def __mul__(self, rhs):
         if isinstance(rhs, SignalFixedPoint):
             # result of mul would have:
             #   self.qi + rhs.qi integer bits
             #   self.qf + rhs.qf frac bits
-            return self.OpResult(self.s * rhs.s, self.qf + rhs.qf)
+            return SignalFixedPoint( value = self.s * rhs.s, frac_bits=self.qf + rhs.qf)
         elif isinstance(rhs, Value):
-            return self.OpResult(self.s * rhs, self.qf)
+            return SignalFixedPoint( value = self.s * rhs, frac_bits=self.qf)
         else:
             raise ArgumentError("rhs not valid type")
     
@@ -47,15 +68,15 @@ class SignalFixedPoint:
         if isinstance(rhs, SignalFixedPoint):
             self_extra_qf = self.qf - rhs.qf
             if self_extra_qf >= 0:
-                return self.OpResult( self.s + (rhs.s.shift_left(self_extra_qf)), self.qf)
+                return SignalFixedPoint( value = self.s + (rhs.s.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return self.OpResult( rhs.s + (self.s.shift_left(-self_extra_qf)), rhs.qf)
+                return SignalFixedPoint( value = rhs.s + (self.s.shift_left(-self_extra_qf)), frac_bits=rhs.qf)
         elif isinstance(rhs, Value):
             self_extra_qf = self.qf - 0
             if self_extra_qf >= 0:
-                return self.OpResult( self.s + (rhs.shift_left(self_extra_qf)), self.qf)
+                return SignalFixedPoint( value = self.s + (rhs.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return self.OpResult( rhs + (self.s.shift_left(-self_extra_qf)), 0)
+                return SignalFixedPoint( value = rhs + (self.s.shift_left(-self_extra_qf)), frac_bits=0)
         else:
             raise ArgumentError("rhs not valid type")
 
@@ -67,19 +88,22 @@ class SignalFixedPoint:
         if isinstance(rhs, SignalFixedPoint):
             self_extra_qf = self.qf - rhs.qf
             if self_extra_qf >= 0:
-                return self.OpResult( self.s - (rhs.s.shift_left(self_extra_qf)), self.qf)
+                return SignalFixedPoint( value = self.s - (rhs.s.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return self.OpResult( rhs.s - (self.s.shift_left(-self_extra_qf)), rhs.qf)
+                return SignalFixedPoint( value = rhs.s - (self.s.shift_left(-self_extra_qf)), frac_bits=rhs.qf)
         elif isinstance(rhs, Value):
             self_extra_qf = self.qf - 0
             if self_extra_qf >= 0:
-                return self.OpResult( self.s - (rhs.shift_left(self_extra_qf)), self.qf)
+                return SignalFixedPoint( value = self.s - (rhs.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return self.OpResult( rhs - (self.s.shift_left(-self_extra_qf)), 0)
+                return SignalFixedPoint( value = rhs - (self.s.shift_left(-self_extra_qf)), frac_bits=0)
         else:
             raise ArgumentError("rhs not valid type")
     
-    def eq(self, rhs : OpResult ):
+    def __neg__(self):
+        return SignalFixedPoint( value = -self.s, frac_bits=self.qf)
+    
+    def eq(self, rhs : "SignalFixedPoint" ):
         self_extra_qf = self.qf - rhs.qf
         return self.s.eq( rhs.s.shift_left(self_extra_qf) )
 
@@ -100,9 +124,9 @@ class SignalFixedPoint:
 def do_sim():
     class TopTest(Elaboratable):
         def __init__(self):
-            self.a = SignalFixedPoint(0,20, value = 0.3)
-            self.b = SignalFixedPoint(3,16, value = 4.4)
-            self.c = SignalFixedPoint(8,8, value = -5.2)
+            self.a = SignalFixedPoint(0,20, constant = 0.3)
+            self.b = SignalFixedPoint(3,16, constant = 4.4)
+            self.c = SignalFixedPoint(8,8, constant = -5.2)
             self.d = C(9)
             
             self.o1 = SignalFixedPoint(16,16, signed=True)
@@ -110,6 +134,8 @@ def do_sim():
             self.o3 = SignalFixedPoint(16,16, signed=True)
             self.o4 = SignalFixedPoint(16,16, signed=True)
             self.o5 = SignalFixedPoint(16,16, signed=True)
+            self.o6 = SignalFixedPoint(16,16, signed=True)
+            self.o7 = SignalFixedPoint(16,16, signed=True)
         
         def elaborate(self, platform):
             m = Module()
@@ -120,6 +146,8 @@ def do_sim():
                 self.o3.eq(self.a * self.c),
                 self.o4.eq(self.a + self.c),
                 self.o5.eq(self.b * self.d),
+                self.o6.eq(self.a + self.b * self.d - self.c),
+                self.o7.eq(-self.b),
             ]
             
             return m
@@ -139,6 +167,8 @@ def do_sim():
         v = yield dut.o3.s; print(dut.o3.compute_value(v))
         v = yield dut.o4.s; print(dut.o4.compute_value(v))
         v = yield dut.o5.s; print(dut.o5.compute_value(v))
+        v = yield dut.o6.s; print(dut.o6.compute_value(v))
+        v = yield dut.o7.s; print(dut.o7.compute_value(v))
         
     sim.add_sync_process(sync_loop, domain="sync")
     

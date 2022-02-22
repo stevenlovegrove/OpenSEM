@@ -11,6 +11,7 @@ from amaranth.sim import Simulator
 from amaranth.build.dsl import DiffPairs
 
 from amaranth import *
+from fixed_point import SignalFixedPoint
 
 
 from samplemux import SampleMux
@@ -20,6 +21,7 @@ from sem_board import OpenSemPlatform
 from xadc import XADC
 from ft60x import FT60X_Sync245
 from ledbar import LedBar
+from dac import DAC
 
 # Top-level module glues everything together
 class Top(Elaboratable):
@@ -28,6 +30,15 @@ class Top(Elaboratable):
     
     def elaborate(self, platform):
         m = Module()
+        
+        #params
+        period = 1.0/100e6
+        dac_cap=1e-7
+        dac_res=[1e2, 1e5]
+        
+        # Get references to external signals
+        board_clock = platform.request(platform.default_clk)
+        leds = Cat([platform.request("led", i) for i in range(8)])
 
         # Setup the submodules and connect their signals
         m.submodules.pixel_scan = PixelScan()
@@ -39,17 +50,23 @@ class Top(Elaboratable):
         m.submodules.ft600 = FT60X_Sync245(
             ftdi_resource = platform.request("ft600"),
         )
+        # m.submodules.dac = DAC(
+        #     delta_time=period, capacitor=dac_cap, resistors=dac_res,
+        #     output_pwm=platform.request("dac_scan_y")
+        # )
         
         m.submodules.ledbar = LedBar(12,8)
 
-        leds = Cat([platform.request("led", i) for i in range(8)])
-        board_clock = platform.request(platform.default_clk)
         
         # Three clock domains, all rising edge
         #   sync and ftdi are similar clocks speeds, possibly out of phase
         #   pixel is derived from sync, possibly the same
         m.domains.sync = ClockDomain("sync")
         m.domains.pixel = ClockDomain("pixel")
+        
+        counter = Signal(21)
+        # sawtooth_int = Mux( counter[-1], counter[:20], C(0xfffff) - counter[:20] )
+        # sawtooth = SignalFixedPoint(0,20)
         
         m.d.comb += [
             # Let's just set the pixel clock equal to main clock for now          
@@ -61,6 +78,10 @@ class Top(Elaboratable):
             
             m.submodules.ledbar.value.eq(m.submodules.xadc.adc_sample_value),
             leds.eq(m.submodules.ledbar.bar),
+            
+            # sawtooth.s.eq(sawtooth_int),
+            # m.submodules.dac.input.eq(sawtooth)
+            # m.submodules.dac.input.eq(SignalFixedPoint(1,19,signed=True,constant=0.5))
         ]
         
         with m.If(m.submodules.xadc.adc_sample_ready):
@@ -72,6 +93,8 @@ class Top(Elaboratable):
          
         m.d.pixel += [            
             m.submodules.pixel_scan.hold.eq(0),     
+            counter.eq(counter +1),
+            platform.request("dac_scan_y").eq(counter[0:2])
         ]
         
         return m
