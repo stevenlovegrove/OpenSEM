@@ -70,13 +70,13 @@ class SignalFixedPoint:
             if self_extra_qf >= 0:
                 return SignalFixedPoint( value = self.s + (rhs.s.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return SignalFixedPoint( value = rhs.s + (self.s.shift_left(-self_extra_qf)), frac_bits=rhs.qf)
+                return SignalFixedPoint( value = (self.s.shift_left(-self_extra_qf)) + rhs.s, frac_bits=rhs.qf)
         elif isinstance(rhs, Value):
             self_extra_qf = self.qf - 0
             if self_extra_qf >= 0:
                 return SignalFixedPoint( value = self.s + (rhs.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return SignalFixedPoint( value = rhs + (self.s.shift_left(-self_extra_qf)), frac_bits=0)
+                return SignalFixedPoint( value = (self.s.shift_left(-self_extra_qf)) + rhs, frac_bits=0)
         else:
             raise ArgumentError("rhs not valid type")
 
@@ -90,13 +90,13 @@ class SignalFixedPoint:
             if self_extra_qf >= 0:
                 return SignalFixedPoint( value = self.s - (rhs.s.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return SignalFixedPoint( value = rhs.s - (self.s.shift_left(-self_extra_qf)), frac_bits=rhs.qf)
+                return SignalFixedPoint( value = (self.s.shift_left(-self_extra_qf)) - rhs.s, frac_bits=rhs.qf)
         elif isinstance(rhs, Value):
             self_extra_qf = self.qf - 0
             if self_extra_qf >= 0:
                 return SignalFixedPoint( value = self.s - (rhs.shift_left(self_extra_qf)), frac_bits=self.qf)
             else:
-                return SignalFixedPoint( value = rhs - (self.s.shift_left(-self_extra_qf)), frac_bits=0)
+                return SignalFixedPoint( value = (self.s.shift_left(-self_extra_qf)) - rhs, frac_bits=0)
         else:
             raise ArgumentError("rhs not valid type")
     

@@ -52,69 +52,89 @@ class DAC(Elaboratable):
             output_pwm
             ):
         # Constants
+        self.frac_bits = 30
         self.n = len(resistors)
         self.delta_t_inv_tau = [
-            SignalFixedPoint(1, 19, constant= delta_time/(capacitor*R), signed=True ) for R in resistors
+            SignalFixedPoint(1, self.frac_bits, constant= delta_time/(capacitor*R), signed=True ) for R in resistors
         ]
         
         # Output (tristate)
         self.pwm = output_pwm
+        assert( self.pwm.shape().width == self.n)
 
         # Input : [0,1]
-        self.input = SignalFixedPoint(1,19,signed=True)
+        self.input = SignalFixedPoint(1, self.frac_bits,signed=True)
         self.input.s.name = "input"
 
         # Estimate of filtered output [0,1]        
-        self.v_out = SignalFixedPoint(1,19,signed=True)
+        self.v_out = SignalFixedPoint(1, self.frac_bits,signed=True)
         self.v_out.s.reset = self.v_out.to_binary(0.5)
         self.v_out.s.name = "vout"
         
         # possible pwm array states
         self.options = [ Cat([C(y,1) for y in list(x)]) for x in list(seq(1,self.n)) ]
+        self.n_ops = len(self.options)
         
     @staticmethod
     def info(name, fixed):
         print(name, fixed.s.shape(), fixed.s.shape().width - fixed.qf, fixed.qf)
         
     def delta_v(self, pwms):
+        # TODO can factor delta_t_inv_tau out to compute multiplication just once with self.v_out shared between all delta_v's
         diffs = [ SignalFixedPoint(value=pwm,frac_bits=0) - self.v_out for pwm in pwms]
+        
         dvs = [self.delta_t_inv_tau[i] * diffs[i] for i in range(self.n)]
         sum = functools.reduce(lambda a, b: a+b, dvs)
         return sum
     
     def elaborate(self, platform):
         m = Module()
-
+        
         deltas = [ self.delta_v(opt) for opt in self.options]
+        # deltas = [SignalFixedPoint(1,self.frac_bits+1,signed=True) for _ in range(self.n_ops)]
+        # m.d.sync += [deltas[i].eq(self.delta_v(self.options[i])) for i in range(self.n_ops)]        
+        
         outcomes = [ self.v_out + delta for delta in deltas]
         errors = [ abs((o - self.input).s) for o in outcomes]
-        
+        # errors = [Signal(self.frac_bits+1) for _ in range(self.n_ops)]
+        # m.d.sync += [ errors[i].eq(abs((outcomes[i] - self.input).s)) for i in range(self.n_ops) ]
+                
         least_idx = argmin(errors)
         least_pwm = Cat(self.options).word_select(least_idx, self.n )
+        least_vouts = Cat([o.s for o in outcomes]).word_select(least_idx, outcomes[0].s.shape().width )
+        least_vout = SignalFixedPoint(value=least_vouts, frac_bits=outcomes[0].qf)
                 
         m.d.sync += [
             self.pwm.eq( least_pwm ),
-            self.v_out.eq( self.v_out + self.delta_v(least_pwm)),
+            self.v_out.eq( least_vout ),
         ]
         
-        # # debug signals
-        # for i in range(len(outcomes)):
-        #     s = Signal(outcomes[i].s.shape().width, name="outcome{}".format(i)); m.d.comb += s.eq(outcomes[i].s)
-        #     s = Signal(errors[i].shape().width, name="errors{}".format(i)); m.d.comb += s.eq(errors[i])
+        for i in range(self.n_ops):
+            deltas[i].s.name = "delta" + str(i)
+            errors[i].name = "errors" + str(i)
         
-        # v0 = SignalFixedPoint(1,0, constant=0.0)
-        # v1 = SignalFixedPoint(1,0, constant=1.0)
-        # diff0 = v0 - self.v_out
-        # diff1 = v1 - self.v_out
+        # debug signals        
+        v0 = SignalFixedPoint(1,0, constant=0.0)
+        v1 = SignalFixedPoint(1,0, constant=1.0)
+        diff0 = v0 - self.v_out
+        diff1 = v1 - self.v_out
+
+        for i in range(len(self.options)):
+            m.d.comb += [
+                Signal(outcomes[i].s.shape().width, name="outcome{}".format(i)).eq(outcomes[i].s),
+                Signal(errors[i].shape().width, name="errors{}".format(i)).eq(errors[i]),
+                Signal(self.options[i].shape(),name="opt"+str(i)).eq(self.options[i]),            
+            ]
+
         
-        # m.d.sync += [
-        #     Signal(2,name="least_idx").eq(least_idx),
-        #     Signal(2,name="least_pwm").eq(least_pwm),
-        #     Signal(2,name="v0").eq(v0.s),
-        #     Signal(2,name="v1").eq(v1.s),            
-        #     Signal(40,name="diff0").eq(diff0.s),
-        #     Signal(40,name="diff1").eq(diff1.s),            
-        # ]
+        m.d.comb += [
+            Signal(least_idx.shape(),name="least_idx").eq(least_idx),
+            Signal(least_pwm.shape(),name="least_pwm").eq(least_pwm),
+            Signal(v0.s.shape(),name="v0").eq(v0.s),
+            Signal(v1.s.shape(),name="v1").eq(v1.s),            
+            Signal(diff0.s.shape(),name="diff0").eq(diff0.s),
+            Signal(diff1.s.shape(),name="diff1").eq(diff1.s),            
+        ]
         
         return m
         
@@ -125,7 +145,8 @@ if __name__ == "__main__":
     platform = OpenSemPlatform()
     ftdi_resource = platform.request("ft600")
     period = 1.0/100e6
-    dut = DAC(delta_time=period, capacitor=1e-7, resistors=[1e2, 1e5])
+    pwm = Signal(2)
+    dut = DAC(delta_time=period, capacitor=1e-7, resistors=[1e2, 1e5], output_pwm=pwm)
     sim = Simulator(dut)
     sim.add_clock(period, domain="sync")
 

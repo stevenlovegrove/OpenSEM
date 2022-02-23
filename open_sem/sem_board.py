@@ -10,11 +10,13 @@ class SemAddOn:
             Subsignal("p", Pins("H8", dir="i")), # AVP (Element BR - D31)
             Subsignal("n", Pins("J7", dir="i")), # AVN (Element BR - D30)
         ),
-        Resource("dac_scan_y", 0, 
-            Subsignal("R1E2", Pins("T15", dir="o")), # (Element BR - D43)
-            Subsignal("R1E5", Pins("T14", dir="o")), # (Element BR - D42)
-            Attrs(IOSTANDARD="LVCMOS33")
-        ),
+        # Resource("dac_scan_y", 0, 
+        #     Subsignal("R1E3", Pins("T15", dir="o")), # (Element BR - D43)
+        #     Subsignal("R1E5", Pins("T14", dir="o")), # (Element BR - D42)
+        #     Attrs(IOSTANDARD="LVCMOS33")
+        # ),
+        Resource("R1E3", 0, Pins("T15", dir="o"), Attrs(IOSTANDARD="LVCMOS33")), # (Element BR - D43)
+        Resource("R1E5", 0, Pins("T14", dir="o"), Attrs(IOSTANDARD="LVCMOS33")), # (Element BR - D42)
     ]
 
 # Extend definition of existing AlchitryAu board with our 

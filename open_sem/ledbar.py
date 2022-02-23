@@ -13,10 +13,6 @@ class LedBar(Elaboratable):
     def ispow2(n):
         return (n & (n-1) == 0) and n != 0
 
-    # @staticmethod
-    # def programatic_definition(value):        
-    #     pass
-
     def __init__(self, value_bits, bar_width):
         # INPUT
         self.value = Signal(value_bits)
@@ -25,37 +21,30 @@ class LedBar(Elaboratable):
         assert self.ispow2(bar_width)
         self.bar = Signal(bar_width)
 
-        ## Value is n bits wide
+        # Value is n bits wide
         self.n = value_bits
-        ## We can use k MSB's of value_bits directly
+        # We can use k MSB's of value_bits directly
         self.k = int(math.log2(bar_width))
-        ## kn is size of bits k to n
-        self.kn = self.n - self.k
+        # kn is number of bits to use for pwm leds
+        # No point using more than 10 bits - the period can get too long for large numbers
+        self.kn = min(self.n - self.k, 10)
         
     def elaborate(self, platform):
         m = Module()
 
         # val_k, the MSB's tell us how many LED's to light fully
-        val_k = Signal(self.k)
+        val_k = self.value[-self.k:]
         # val_kn, the LSB's tell us the PWM duty cycle of the next LED
-        val_kn = Signal(self.kn)
+        val_kn = self.value[-self.kn-self.k:-self.k]
         
         counter = Signal(self.kn)
-        
-        m.d.comb += [
-            val_k.eq(self.value >> self.kn), # MSB's
-            val_kn.eq(self.value)            # LSB's
-        ]
-        
+               
         m.d.sync += [
             counter.eq(counter +1)
         ]
         
         for i in range(len(self.bar)):
-            with m.If( C(i) == val_k):
-                m.d.comb += self.bar[i].eq( counter < val_kn)
-            with m.Else():
-                m.d.comb += self.bar[i].eq( C(i) < val_k )
+            m.d.comb += self.bar[i].eq( Mux(C(i) == val_k, counter < val_kn, C(i) < val_k) )
                
         return m
    

@@ -22,6 +22,7 @@ from xadc import XADC
 from ft60x import FT60X_Sync245
 from ledbar import LedBar
 from dac import DAC
+from pwm import PWM
 
 # Top-level module glues everything together
 class Top(Elaboratable):
@@ -34,14 +35,15 @@ class Top(Elaboratable):
         #params
         period = 1.0/100e6
         dac_cap=1e-7
-        dac_res=[1e2, 1e5]
+        dac_res=[1e3]
         
         # Get references to external signals
-        board_clock = platform.request(platform.default_clk)
         leds = Cat([platform.request("led", i) for i in range(8)])
-
+        dac_scan_y0 = platform.request("R1E3")
+        dac_scan_y1 = platform.request("R1E5")
+        
         # Setup the submodules and connect their signals
-        m.submodules.pixel_scan = PixelScan()
+        # m.submodules.pixel_scan = PixelScan()
         # m.submodules.backscatter = Backscatter(12)
         # m.submodules.sample_mux = SampleMux(16, [12,12,12,12] )
         m.submodules.xadc = XADC(
@@ -50,38 +52,56 @@ class Top(Elaboratable):
         m.submodules.ft600 = FT60X_Sync245(
             ftdi_resource = platform.request("ft600"),
         )
-        # m.submodules.dac = DAC(
-        #     delta_time=period, capacitor=dac_cap, resistors=dac_res,
-        #     output_pwm=platform.request("dac_scan_y")
-        # )
-        
-        m.submodules.ledbar = LedBar(12,8)
-
-        
+        m.submodules.dac = DAC(
+            delta_time=period, capacitor=dac_cap, resistors=dac_res,
+            output_pwm=dac_scan_y0
+        )
+        m.submodules.pwm = PWM()
+        m.submodules.pwm.pwm = dac_scan_y1
+               
         # Three clock domains, all rising edge
         #   sync and ftdi are similar clocks speeds, possibly out of phase
         #   pixel is derived from sync, possibly the same
-        m.domains.sync = ClockDomain("sync")
-        m.domains.pixel = ClockDomain("pixel")
+        # m.domains.sync = ClockDomain("sync")
+        # m.domains.pixel = ClockDomain("pixel")
         
-        counter = Signal(21)
-        # sawtooth_int = Mux( counter[-1], counter[:20], C(0xfffff) - counter[:20] )
-        # sawtooth = SignalFixedPoint(0,20)
+        # One cycle at 100Mhz is 10ns.
+        # Bit n flips at [2**n * 1e-8] second intervals
+        # 0-7   bits: 10ns, 20ns, 40ns, 80ns, 160ns, 320ns, 640ns, 1.280us,
+        # 8-15  bits: 2.56us, 5.12us, 10.24us, 20.48us, 40.96us, 81.92us, 163.84us, 327.68us,
+        # 16-23 bits: 655.36us, 1.31072ms, 2.62144ms, 5.24288ms, 10.48576ms, 20.97152ms, 41.94304ms, 83.88608ms,
+        # 24-31 bits: 167.77216ms, 335.54432ms, 671.08864ms, 1.34217728s, 2.68435456s, 5.36870912s, 10.73741824s, 21.47483648s
+        # 32-39 bits: 42.94967296s, 85.89934592s, 171.79869184s, 343.59738368s, 687.19476736s, 1374.38953472s, 2748.77906944s, 5497.55813888s
+        counter_bits = 16 #26
+        counter = Signal(counter_bits+1)
+        sawtooth_int = Mux( ~counter[counter_bits], counter[:counter_bits], C(2**counter_bits-1) - counter[:counter_bits] )[:counter_bits] # each ramp lasts 671.08864ms
+        
+        m.submodules.ledbar = LedBar(counter_bits,8)
         
         m.d.comb += [
             # Let's just set the pixel clock equal to main clock for now          
-            ClockSignal(domain="sync").eq(board_clock),
-            ClockSignal(domain="pixel").eq(board_clock),
+            # ClockSignal(domain="sync").eq(board_clock),
+            # ClockSignal(domain="pixel").eq(board_clock),
             
-            m.submodules.pixel_scan.x_steps.eq(C(4095)),
-            m.submodules.pixel_scan.y_steps.eq(C(4095)),
+            # m.submodules.pixel_scan.x_steps.eq(C(4095)),
+            # m.submodules.pixel_scan.y_steps.eq(C(4095)),
             
-            m.submodules.ledbar.value.eq(m.submodules.xadc.adc_sample_value),
-            leds.eq(m.submodules.ledbar.bar),
+            m.submodules.ledbar.value.eq(sawtooth_int),
+            # m.submodules.ledbar.value.eq(m.submodules.xadc.adc_sample_value),
             
-            # sawtooth.s.eq(sawtooth_int),
+            
             # m.submodules.dac.input.eq(sawtooth)
             # m.submodules.dac.input.eq(SignalFixedPoint(1,19,signed=True,constant=0.5))
+        ]
+        
+        m.d.sync += [            
+            counter.eq(counter + 1),
+            
+            m.submodules.dac.input.eq( SignalFixedPoint(value=sawtooth_int, frac_bits=sawtooth_int.shape().width) ),
+            m.submodules.pwm.input.eq( sawtooth_int[-16:]),
+            
+            # m.submodules.pixel_scan.hold.eq(0),     
+            leds.eq(m.submodules.ledbar.bar),
         ]
         
         with m.If(m.submodules.xadc.adc_sample_ready):
@@ -90,12 +110,6 @@ class Top(Elaboratable):
                 m.submodules.ft600.fifo_to_f60x.w_data.eq( Cat( m.submodules.xadc.adc_sample_value, C(0000), C(11) ) ),
                 m.submodules.ft600.fifo_to_f60x.w_en.eq(1)
             ]
-         
-        m.d.pixel += [            
-            m.submodules.pixel_scan.hold.eq(0),     
-            counter.eq(counter +1),
-            platform.request("dac_scan_y").eq(counter[0:2])
-        ]
         
         return m
 
@@ -143,7 +157,7 @@ if __name__ == "__main__":
         case "simulate":
             fragment = Fragment.get(design, platform)
             sim = Simulator(fragment)
-            sim.add_clock(args.sync_period, domain="pixel")
+            sim.add_clock(args.sync_period)
             with sim.write_vcd(vcd_file=args.vcd_file):
                 sim.run_until(args.sync_period * args.sync_clocks, run_passive=True)
         case "build":            
