@@ -52,7 +52,7 @@ class DAC(Elaboratable):
             output_pwm
             ):
         # Constants
-        self.frac_bits = 30
+        self.frac_bits = 20
         self.n = len(resistors)
         self.delta_t_inv_tau = [
             SignalFixedPoint(1, self.frac_bits, constant= delta_time/(capacitor*R), signed=True ) for R in resistors
@@ -113,28 +113,28 @@ class DAC(Elaboratable):
             deltas[i].s.name = "delta" + str(i)
             errors[i].name = "errors" + str(i)
         
-        # debug signals        
-        v0 = SignalFixedPoint(1,0, constant=0.0)
-        v1 = SignalFixedPoint(1,0, constant=1.0)
-        diff0 = v0 - self.v_out
-        diff1 = v1 - self.v_out
+        # # debug signals        
+        # v0 = SignalFixedPoint(1,0, constant=0.0)
+        # v1 = SignalFixedPoint(1,0, constant=1.0)
+        # diff0 = v0 - self.v_out
+        # diff1 = v1 - self.v_out
 
-        for i in range(len(self.options)):
-            m.d.comb += [
-                Signal(outcomes[i].s.shape().width, name="outcome{}".format(i)).eq(outcomes[i].s),
-                Signal(errors[i].shape().width, name="errors{}".format(i)).eq(errors[i]),
-                Signal(self.options[i].shape(),name="opt"+str(i)).eq(self.options[i]),            
-            ]
+        # for i in range(len(self.options)):
+        #     m.d.comb += [
+        #         Signal(outcomes[i].s.shape().width, name="outcome{}".format(i)).eq(outcomes[i].s),
+        #         Signal(errors[i].shape().width, name="errors{}".format(i)).eq(errors[i]),
+        #         Signal(self.options[i].shape(),name="opt"+str(i)).eq(self.options[i]),            
+        #     ]
 
         
-        m.d.comb += [
-            Signal(least_idx.shape(),name="least_idx").eq(least_idx),
-            Signal(least_pwm.shape(),name="least_pwm").eq(least_pwm),
-            Signal(v0.s.shape(),name="v0").eq(v0.s),
-            Signal(v1.s.shape(),name="v1").eq(v1.s),            
-            Signal(diff0.s.shape(),name="diff0").eq(diff0.s),
-            Signal(diff1.s.shape(),name="diff1").eq(diff1.s),            
-        ]
+        # m.d.comb += [
+        #     Signal(least_idx.shape(),name="least_idx").eq(least_idx),
+        #     Signal(least_pwm.shape(),name="least_pwm").eq(least_pwm),
+        #     Signal(v0.s.shape(),name="v0").eq(v0.s),
+        #     Signal(v1.s.shape(),name="v1").eq(v1.s),            
+        #     Signal(diff0.s.shape(),name="diff0").eq(diff0.s),
+        #     Signal(diff1.s.shape(),name="diff1").eq(diff1.s),            
+        # ]
         
         return m
         

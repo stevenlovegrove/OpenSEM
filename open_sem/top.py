@@ -72,7 +72,7 @@ class Top(Elaboratable):
         # 16-23 bits: 655.36us, 1.31072ms, 2.62144ms, 5.24288ms, 10.48576ms, 20.97152ms, 41.94304ms, 83.88608ms,
         # 24-31 bits: 167.77216ms, 335.54432ms, 671.08864ms, 1.34217728s, 2.68435456s, 5.36870912s, 10.73741824s, 21.47483648s
         # 32-39 bits: 42.94967296s, 85.89934592s, 171.79869184s, 343.59738368s, 687.19476736s, 1374.38953472s, 2748.77906944s, 5497.55813888s
-        counter_bits = 16 #26
+        counter_bits = 26
         counter = Signal(counter_bits+1)
         sawtooth_int = Mux( ~counter[counter_bits], counter[:counter_bits], C(2**counter_bits-1) - counter[:counter_bits] )[:counter_bits] # each ramp lasts 671.08864ms
         
